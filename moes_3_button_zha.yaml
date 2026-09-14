@@ -2,6 +2,7 @@ blueprint:
   name: ZHA - MOES 3-Button Scene Switch
   description: Map actions and scripts to Single, Double, and Long presses on a MOES Zigbee 3-button scene switch.
   domain: automation
+  source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/moes_3_button_zha.yaml
   input:
     moes_switch:
       name: MOES Switch Device
