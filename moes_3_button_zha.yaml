@@ -1,0 +1,109 @@
+blueprint:
+  name: ZHA - MOES 3-Button Scene Switch
+  description: Map actions and scripts to Single, Double, and Long presses on a MOES Zigbee 3-button scene switch.
+  domain: automation
+  input:
+    moes_switch:
+      name: MOES Switch Device
+      description: Select your MOES 3-button remote.
+      selector:
+        device:
+          integration: zha
+
+    # --- BUTTON 1 ---
+    btn_1_short:
+      name: Button 1 - Short Press
+      description: Action for single press on button 1.
+      default: []
+      selector:
+        action: {}
+    btn_1_double:
+      name: Button 1 - Double Press
+      description: Action for double press on button 1.
+      default: []
+      selector:
+        action: {}
+    btn_1_long:
+      name: Button 1 - Long Press
+      description: Action for hold/long press on button 1.
+      default: []
+      selector:
+        action: {}
+
+    # --- BUTTON 2 ---
+    btn_2_short:
+      name: Button 2 - Short Press
+      description: Action for single press on button 2.
+      default: []
+      selector:
+        action: {}
+    btn_2_double:
+      name: Button 2 - Double Press
+      description: Action for double press on button 2.
+      default: []
+      selector:
+        action: {}
+    btn_2_long:
+      name: Button 2 - Long Press
+      description: Action for hold/long press on button 2.
+      default: []
+      selector:
+        action: {}
+
+    # --- BUTTON 3 ---
+    btn_3_short:
+      name: Button 3 - Short Press
+      description: Action for single press on button 3.
+      default: []
+      selector:
+        action: {}
+    btn_3_double:
+      name: Button 3 - Double Press
+      description: Action for double press on button 3.
+      default: []
+      selector:
+        action: {}
+    btn_3_long:
+      name: Button 3 - Long Press
+      description: Action for hold/long press on button 3.
+      default: []
+      selector:
+        action: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input moes_switch
+
+action:
+  - variables:
+      command: "{{ trigger.event.data.command }}"
+      endpoint_id: "{{ trigger.event.data.endpoint_id | int }}"
+  - choose:
+      # Button 1 Actions
+      - conditions: "{{ endpoint_id == 1 and command == 'remote_button_short_press' }}"
+        sequence: !input btn_1_short
+      - conditions: "{{ endpoint_id == 1 and command == 'remote_button_double_press' }}"
+        sequence: !input btn_1_double
+      - conditions: "{{ endpoint_id == 1 and command == 'remote_button_long_press' }}"
+        sequence: !input btn_1_long
+
+      # Button 2 Actions
+      - conditions: "{{ endpoint_id == 2 and command == 'remote_button_short_press' }}"
+        sequence: !input btn_2_short
+      - conditions: "{{ endpoint_id == 2 and command == 'remote_button_double_press' }}"
+        sequence: !input btn_2_double
+      - conditions: "{{ endpoint_id == 2 and command == 'remote_button_long_press' }}"
+        sequence: !input btn_2_long
+
+      # Button 3 Actions
+      - conditions: "{{ endpoint_id == 3 and command == 'remote_button_short_press' }}"
+        sequence: !input btn_3_short
+      - conditions: "{{ endpoint_id == 3 and command == 'remote_button_double_press' }}"
+        sequence: !input btn_3_double
+      - conditions: "{{ endpoint_id == 3 and command == 'remote_button_long_press' }}"
+        sequence: !input btn_3_long
