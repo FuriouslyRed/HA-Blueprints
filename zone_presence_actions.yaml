@@ -1,1 +1,74 @@
-.
+blueprint:
+  name: Zone Presence & Actions
+  description: >
+    Monitor multiple people or device trackers entering or leaving a specified zone 
+    and run custom actions or scripts accordingly.
+  domain: automation
+  source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/zone_presence_actions.yaml
+  input:
+    tracked_entities:
+      name: Tracked Entities
+      description: Select the people or device trackers to monitor.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: person
+            - domain: device_tracker
+
+    monitored_zone:
+      name: Monitored Zone
+      description: The zone to track arrivals and departures for.
+      default: zone.home
+      selector:
+        entity:
+          filter:
+            - domain: zone
+
+    zone_enter_actions:
+      name: Zone Enter Actions
+      description: Actions or scripts to execute when any selected entity enters the zone.
+      default: []
+      selector:
+        action: {}
+
+    zone_leave_actions:
+      name: Zone Leave Actions
+      description: Actions or scripts to execute when any selected entity leaves the zone.
+      default: []
+      selector:
+        action: {}
+
+mode: queued
+max: 10
+
+trigger:
+  - platform: state
+    entity_id: !input tracked_entities
+    id: zone_event
+
+variables:
+  target_zone: !input monitored_zone
+  zone_state_name: >
+    {{ state_attr(target_zone, 'friendly_name') | lower if target_zone != 'zone.home' else 'home' }}
+  trigger_to: "{{ trigger.to_state.state | lower }}"
+  trigger_from: "{{ trigger.from_state.state | lower }}"
+
+condition:
+  - condition: template
+    value_template: >
+      {{ trigger_to == zone_state_name or trigger_from == zone_state_name }}
+
+action:
+  - choose:
+      # ARRIVAL
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger_to == zone_state_name }}"
+        sequence: !input zone_enter_actions
+
+      # DEPARTURE
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger_from == zone_state_name }}"
+        sequence: !input zone_leave_actions
