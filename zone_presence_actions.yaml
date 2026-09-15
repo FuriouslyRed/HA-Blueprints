@@ -1,14 +1,24 @@
 blueprint:
   name: Zone Presence & Actions
   description: >
-    Monitor multiple people or device trackers entering or leaving a specified zone 
-    and run custom actions or scripts accordingly.
+    Track individuals or groups entering/leaving a zone with dedicated action slots 
+    per person/group, plus optional triggers for first arrival and everyone leaving.
   domain: automation
   source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/zone_presence_actions.yaml
   input:
-    tracked_entities:
-      name: Tracked Entities
-      description: Select the people or device trackers to monitor.
+    monitored_zone:
+      name: Monitored Zone
+      description: The zone to monitor.
+      default: zone.home
+      selector:
+        entity:
+          filter:
+            - domain: zone
+
+    # --- GROUP 1 / PRIMARY ---
+    group_1_entities:
+      name: "Group / Person 1: Tracked Entities"
+      description: Select one or more people or device trackers for Group 1.
       selector:
         entity:
           multiple: true
@@ -16,25 +26,83 @@ blueprint:
             - domain: person
             - domain: device_tracker
 
-    monitored_zone:
-      name: Monitored Zone
-      description: The zone to track arrivals and departures for.
-      default: zone.home
-      selector:
-        entity:
-          filter:
-            - domain: zone
-
-    zone_enter_actions:
-      name: Zone Enter Actions
-      description: Actions or scripts to execute when any selected entity enters the zone.
+    group_1_enter_actions:
+      name: "Group / Person 1: Enter Actions"
+      description: Actions to run when anyone in Group 1 enters the zone.
       default: []
       selector:
         action: {}
 
-    zone_leave_actions:
-      name: Zone Leave Actions
-      description: Actions or scripts to execute when any selected entity leaves the zone.
+    group_1_leave_actions:
+      name: "Group / Person 1: Leave Actions"
+      description: Actions to run when anyone in Group 1 leaves the zone.
+      default: []
+      selector:
+        action: {}
+
+    # --- GROUP 2 (OPTIONAL) ---
+    group_2_entities:
+      name: "Group / Person 2: Tracked Entities (Optional)"
+      description: Select one or more people or device trackers for Group 2.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: person
+            - domain: device_tracker
+
+    group_2_enter_actions:
+      name: "Group / Person 2: Enter Actions"
+      description: Actions to run when anyone in Group 2 enters the zone.
+      default: []
+      selector:
+        action: {}
+
+    group_2_leave_actions:
+      name: "Group / Person 2: Leave Actions"
+      description: Actions to run when anyone in Group 2 leaves the zone.
+      default: []
+      selector:
+        action: {}
+
+    # --- GROUP 3 (OPTIONAL) ---
+    group_3_entities:
+      name: "Group / Person 3: Tracked Entities (Optional)"
+      description: Select one or more people or device trackers for Group 3.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: person
+            - domain: device_tracker
+
+    group_3_enter_actions:
+      name: "Group / Person 3: Enter Actions"
+      description: Actions to run when anyone in Group 3 enters the zone.
+      default: []
+      selector:
+        action: {}
+
+    group_3_leave_actions:
+      name: "Group / Person 3: Leave Actions"
+      description: Actions to run when anyone in Group 3 leaves the zone.
+      default: []
+      selector:
+        action: {}
+
+    # --- COLLECTIVE / OCCUPANCY STATE ---
+    first_arrival_actions:
+      name: "Everyone / Occupancy: First to Arrive"
+      description: Actions to execute when the zone transitions from 0 to 1+ of all monitored entities.
+      default: []
+      selector:
+        action: {}
+
+    everyone_left_actions:
+      name: "Everyone / Occupancy: Last to Leave"
+      description: Actions to execute when all monitored entities have left the zone.
       default: []
       selector:
         action: {}
@@ -44,8 +112,14 @@ max: 10
 
 trigger:
   - platform: state
-    entity_id: !input tracked_entities
-    id: zone_event
+    entity_id: !input group_1_entities
+    id: group_1
+  - platform: state
+    entity_id: !input group_2_entities
+    id: group_2
+  - platform: state
+    entity_id: !input group_3_entities
+    id: group_3
 
 variables:
   target_zone: !input monitored_zone
@@ -53,22 +127,63 @@ variables:
     {{ state_attr(target_zone, 'friendly_name') | lower if target_zone != 'zone.home' else 'home' }}
   trigger_to: "{{ trigger.to_state.state | lower }}"
   trigger_from: "{{ trigger.from_state.state | lower }}"
+  is_enter: "{{ trigger_to == zone_state_name }}"
+  is_leave: "{{ trigger_from == zone_state_name }}"
+
+  # Combine all defined entities to check global occupancy counts
+  g1: !input group_1_entities
+  g2: !input group_2_entities
+  g3: !input group_3_entities
+  all_entities: >
+    {{ (g1 if g1 is list else [g1]) + (g2 if g2 is list else [g2]) + (g3 if g3 is list else [g3]) | reject('none') | reject('eq', '') | unique | list }}
+  
+  # Count how many monitored entities are currently in the target zone
+  current_present_count: >
+    {{ expand(all_entities) | selectattr('state', 'match', zone_state_name, ignorecase=True) | list | count }}
 
 condition:
   - condition: template
-    value_template: >
-      {{ trigger_to == zone_state_name or trigger_from == zone_state_name }}
+    value_template: "{{ is_enter or is_leave }}"
 
 action:
-  - choose:
-      # ARRIVAL
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger_to == zone_state_name }}"
-        sequence: !input zone_enter_actions
+  # 1. First to Arrive Check (current count is 1 after enter)
+  - if:
+      - condition: template
+        value_template: "{{ is_enter and current_present_count == 1 }}"
+    then: !input first_arrival_actions
 
-      # DEPARTURE
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger_from == zone_state_name }}"
-        sequence: !input zone_leave_actions
+  # 2. Group 1 Actions
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'group_1' and is_enter }}"
+    then: !input group_1_enter_actions
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'group_1' and is_leave }}"
+    then: !input group_1_leave_actions
+
+  # 3. Group 2 Actions
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'group_2' and is_enter }}"
+    then: !input group_2_enter_actions
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'group_2' and is_leave }}"
+    then: !input group_2_leave_actions
+
+  # 4. Group 3 Actions
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'group_3' and is_enter }}"
+    then: !input group_3_enter_actions
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'group_3' and is_leave }}"
+    then: !input group_3_leave_actions
+
+  # 5. Last to Leave / Everyone Left Check (current count is 0 after leave)
+  - if:
+      - condition: template
+        value_template: "{{ is_leave and current_present_count == 0 }}"
+    then: !input everyone_left_actions
