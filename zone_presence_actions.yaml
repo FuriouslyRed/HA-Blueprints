@@ -125,10 +125,11 @@ variables:
   target_zone: !input monitored_zone
   zone_state_name: >
     {{ state_attr(target_zone, 'friendly_name') | lower if target_zone != 'zone.home' else 'home' }}
-  trigger_to: "{{ trigger.to_state.state | lower }}"
-  trigger_from: "{{ trigger.from_state.state | lower }}"
-  is_enter: "{{ trigger_to == zone_state_name }}"
-  is_leave: "{{ trigger_from == zone_state_name }}"
+  trigger_to: "{{ trigger.to_state.state | lower if trigger.to_state is defined else '' }}"
+  trigger_from: "{{ trigger.from_state.state | lower if trigger.from_state is defined else '' }}"
+  # Strictly verify that an actual transition across the zone boundary took place
+  is_enter: "{{ trigger_from != zone_state_name and trigger_to == zone_state_name }}"
+  is_leave: "{{ trigger_from == zone_state_name and trigger_to != zone_state_name }}"
 
   # Combine all defined entities to check global occupancy counts
   g1: !input group_1_entities
@@ -142,8 +143,12 @@ variables:
     {{ expand(all_entities) | selectattr('state', 'match', zone_state_name, ignorecase=True) | list | count }}
 
 condition:
+  # Discard attribute-only changes and ensure it is a real arrival or departure
   - condition: template
-    value_template: "{{ is_enter or is_leave }}"
+    value_template: >
+      {{ trigger.from_state is defined and trigger.to_state is defined 
+         and trigger.from_state.state != trigger.to_state.state 
+         and (is_enter or is_leave) }}
 
 action:
   # 1. First to Arrive Check (current count is 1 after enter)
