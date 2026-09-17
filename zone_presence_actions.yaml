@@ -15,6 +15,16 @@ blueprint:
           filter:
             - domain: zone
 
+    debounce_delay:
+      name: Debounce Delay
+      description: Time to wait to confirm the state change before triggering actions (prevents false triggers from GPS drift).
+      default:
+        hours: 0
+        minutes: 0
+        seconds: 0
+      selector:
+        duration: {}
+
     # --- GROUP 1 / PRIMARY ---
     group_1_entities:
       name: "Group / Person 1: Tracked Entities"
@@ -127,23 +137,17 @@ variables:
     {{ state_attr(target_zone, 'friendly_name') | lower if target_zone != 'zone.home' else 'home' }}
   trigger_to: "{{ trigger.to_state.state | lower if trigger.to_state is defined else '' }}"
   trigger_from: "{{ trigger.from_state.state | lower if trigger.from_state is defined else '' }}"
-  # Strictly verify that an actual transition across the zone boundary took place
   is_enter: "{{ trigger_from != zone_state_name and trigger_to == zone_state_name }}"
   is_leave: "{{ trigger_from == zone_state_name and trigger_to != zone_state_name }}"
 
-  # Combine all defined entities to check global occupancy counts
+  # Combine all defined entities
   g1: !input group_1_entities
   g2: !input group_2_entities
   g3: !input group_3_entities
   all_entities: >
     {{ (g1 if g1 is list else [g1]) + (g2 if g2 is list else [g2]) + (g3 if g3 is list else [g3]) | reject('none') | reject('eq', '') | unique | list }}
-  
-  # Count how many monitored entities are currently in the target zone
-  current_present_count: >
-    {{ expand(all_entities) | selectattr('state', 'match', zone_state_name, ignorecase=True) | list | count }}
 
 condition:
-  # Discard attribute-only changes and ensure it is a real arrival or departure
   - condition: template
     value_template: >
       {{ trigger.from_state is defined and trigger.to_state is defined 
@@ -151,13 +155,27 @@ condition:
          and (is_enter or is_leave) }}
 
 action:
-  # 1. First to Arrive Check (current count is 1 after enter)
+  # 1. Debounce pause
+  - delay: !input debounce_delay
+
+  # 2. Confirm the entity is STILL in the expected state after the debounce window
+  - condition: template
+    value_template: >
+      {{ (is_enter and (states(trigger.entity_id) | lower == zone_state_name)) or
+         (is_leave and (states(trigger.entity_id) | lower != zone_state_name)) }}
+
+  # 3. Recalculate present count post-delay so other arrivals/departures in the window are accurate
+  - variables:
+      current_present_count: >
+        {{ expand(all_entities) | selectattr('state', 'match', zone_state_name, ignorecase=True) | list | count }}
+
+  # 4. First to Arrive Check
   - if:
       - condition: template
         value_template: "{{ is_enter and current_present_count == 1 }}"
     then: !input first_arrival_actions
 
-  # 2. Group 1 Actions
+  # 5. Group 1 Actions
   - if:
       - condition: template
         value_template: "{{ trigger.id == 'group_1' and is_enter }}"
@@ -167,7 +185,7 @@ action:
         value_template: "{{ trigger.id == 'group_1' and is_leave }}"
     then: !input group_1_leave_actions
 
-  # 3. Group 2 Actions
+  # 6. Group 2 Actions
   - if:
       - condition: template
         value_template: "{{ trigger.id == 'group_2' and is_enter }}"
@@ -177,7 +195,7 @@ action:
         value_template: "{{ trigger.id == 'group_2' and is_leave }}"
     then: !input group_2_leave_actions
 
-  # 4. Group 3 Actions
+  # 7. Group 3 Actions
   - if:
       - condition: template
         value_template: "{{ trigger.id == 'group_3' and is_enter }}"
@@ -187,7 +205,7 @@ action:
         value_template: "{{ trigger.id == 'group_3' and is_leave }}"
     then: !input group_3_leave_actions
 
-  # 5. Last to Leave / Everyone Left Check (current count is 0 after leave)
+  # 8. Last to Leave / Everyone Left Check
   - if:
       - condition: template
         value_template: "{{ is_leave and current_present_count == 0 }}"
