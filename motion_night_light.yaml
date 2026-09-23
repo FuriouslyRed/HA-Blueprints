@@ -1,0 +1,108 @@
+blueprint:
+  name: Motion-Activated Night Light with Internet Offline Alert
+  description: >
+    Turn on a night light to a set brightness when motion is detected. 
+    If internet connectivity is lost, overrides normal mode to shine red at 10% brightness. 
+    Turns off after motion clears for a set duration.
+  domain: automation
+  source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/motion_night_light.yaml
+  input:
+    motion_sensor:
+      name: Motion Sensor
+      description: The motion or occupancy sensor to monitor.
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class: motion
+            - domain: binary_sensor
+              device_class: occupancy
+
+    light_target:
+      name: Light
+      description: The light entity or group to control.
+      selector:
+        target:
+          entity:
+            filter:
+              - domain: light
+
+    internet_sensor:
+      name: Internet Connectivity Sensor
+      description: Binary sensor tracking your connection (e.g. Ping sensor pinging 1.1.1.1 or 8.8.8.8).
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+
+    brightness_pct:
+      name: Normal Brightness Level
+      description: Brightness percentage during standard operation.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    no_motion_wait:
+      name: Off Delay
+      description: How long to wait after motion clears before turning off the light.
+      default:
+        minutes: 1
+      selector:
+        duration: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    from: "off"
+    to: "on"
+
+variables:
+  net_sensor: !input internet_sensor
+  # Internet is considered down if the sensor state is 'off' or unavailable
+  internet_down: "{{ states(net_sensor) in ['off', 'unavailable', 'unknown'] }}"
+
+action:
+  # Choose behavior based on internet connectivity state
+  - choose:
+      # --- OFFLINE ALERT MODE (Precedence) ---
+      - conditions:
+          - condition: template
+            value_template: "{{ internet_down }}"
+        sequence:
+          - action: light.turn_on
+            target: !input light_target
+            data:
+              rgb_color: [255, 0, 0]
+              brightness_pct: 10
+
+      # --- NORMAL NIGHT LIGHT MODE ---
+      - conditions:
+          - condition: template
+            value_template: "{{ not internet_down }}"
+        sequence:
+          - action: light.turn_on
+            target: !input light_target
+            data:
+              brightness_pct: !input brightness_pct
+
+  # Wait until motion clears
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input motion_sensor
+        from: "on"
+        to: "off"
+
+  # Wait configured countdown duration
+  - delay: !input no_motion_wait
+
+  # Turn off light
+  - action: light.turn_off
+    target: !input light_target
