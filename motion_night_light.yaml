@@ -1,7 +1,8 @@
 blueprint:
-  name: Motion-Activated Night Light with Internet Offline Alert
+  name: Motion-Activated Night Light with Internet Alert & Lux Threshold
   description: >
-    Turn on a night light to a set brightness when motion is detected. 
+    Turn on a night light when motion is detected, provided ambient light is at 
+    or below a configurable lux threshold (e.g. 0 lx for pitch black). 
     If internet connectivity is lost, overrides normal mode to shine red at 10% brightness. 
     Turns off after motion clears for a set duration.
   domain: automation
@@ -34,6 +35,28 @@ blueprint:
           filter:
             - domain: binary_sensor
 
+    illuminance_sensor:
+      name: Illuminance Sensor (Optional)
+      description: Sensor measuring ambient light level (in lux).
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: illuminance
+
+    max_illuminance:
+      name: Illuminance Cutoff Threshold
+      description: Maximum light level (in lux) allowed for the night light to turn on. Set to 0 for pitch black.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 1
+          unit_of_measurement: "lx"
+          mode: box
+
     brightness_pct:
       name: Normal Brightness Level
       description: Brightness percentage during standard operation.
@@ -65,11 +88,21 @@ trigger:
 
 variables:
   net_sensor: !input internet_sensor
+  lux_sensor: !input illuminance_sensor
+  max_lux: !input max_illuminance
   internet_down: "{{ states(net_sensor) in ['off', 'unavailable', 'unknown'] }}"
+  # If no illuminance sensor is selected, consider it dark by default
+  is_dark: >
+    {{ lux_sensor == '' or lux_sensor is none or (states(lux_sensor) | float(0) <= max_lux | float(0)) }}
+
+condition:
+  # Abort early if the internet is up and the room is already bright
+  - condition: template
+    value_template: "{{ internet_down or is_dark }}"
 
 action:
   - choose:
-      # OFFLINE ALERT MODE
+      # OFFLINE ALERT MODE (Precedence)
       - conditions:
           - condition: template
             value_template: "{{ internet_down }}"
@@ -83,7 +116,7 @@ action:
       # NORMAL NIGHT LIGHT MODE
       - conditions:
           - condition: template
-            value_template: "{{ not internet_down }}"
+            value_template: "{{ not internet_down and is_dark }}"
         sequence:
           - action: light.turn_on
             target: !input light_target
