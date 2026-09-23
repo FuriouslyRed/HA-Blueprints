@@ -24,8 +24,7 @@ blueprint:
       selector:
         target:
           entity:
-            filter:
-              - domain: light
+            domain: light
 
     internet_sensor:
       name: Internet Connectivity Sensor
@@ -66,13 +65,11 @@ trigger:
 
 variables:
   net_sensor: !input internet_sensor
-  # Internet is considered down if the sensor state is 'off' or unavailable
   internet_down: "{{ states(net_sensor) in ['off', 'unavailable', 'unknown'] }}"
 
 action:
-  # Choose behavior based on internet connectivity state
   - choose:
-      # --- OFFLINE ALERT MODE (Precedence) ---
+      # OFFLINE ALERT MODE
       - conditions:
           - condition: template
             value_template: "{{ internet_down }}"
@@ -83,7 +80,7 @@ action:
               rgb_color: [255, 0, 0]
               brightness_pct: 10
 
-      # --- NORMAL NIGHT LIGHT MODE ---
+      # NORMAL NIGHT LIGHT MODE
       - conditions:
           - condition: template
             value_template: "{{ not internet_down }}"
@@ -93,16 +90,13 @@ action:
             data:
               brightness_pct: !input brightness_pct
 
-  # Wait until motion clears
   - wait_for_trigger:
       - platform: state
         entity_id: !input motion_sensor
         from: "on"
         to: "off"
 
-  # Wait configured countdown duration
   - delay: !input no_motion_wait
 
-  # Turn off light
   - action: light.turn_off
     target: !input light_target
