@@ -1,10 +1,10 @@
 blueprint:
-  name: Motion-Activated Night Light with Internet Alert & Lux Threshold
+  name: Motion Night Light
   description: >
     Turn on a night light when motion is detected, provided ambient light is at 
     or below a configurable lux threshold (e.g. 0 lx for pitch black). 
     If internet connectivity is lost, overrides normal mode to shine red at 10% brightness. 
-    Turns off after motion clears for a set duration.
+    Runs as a single instance and turns off once motion has stayed clear for the configured duration.
   domain: automation
   source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/motion_night_light.yaml
   input:
@@ -71,13 +71,13 @@ blueprint:
 
     no_motion_wait:
       name: Off Delay
-      description: How long to wait after motion clears before turning off the light.
+      description: How long motion must remain continuously clear before turning off the light.
       default:
         minutes: 1
       selector:
         duration: {}
 
-mode: restart
+mode: single
 max_exceeded: silent
 
 trigger:
@@ -91,12 +91,10 @@ variables:
   lux_sensor: !input illuminance_sensor
   max_lux: !input max_illuminance
   internet_down: "{{ states(net_sensor) in ['off', 'unavailable', 'unknown'] }}"
-  # If no illuminance sensor is selected, consider it dark by default
   is_dark: >
     {{ lux_sensor == '' or lux_sensor is none or (states(lux_sensor) | float(0) <= max_lux | float(0)) }}
 
 condition:
-  # Abort early if the internet is up and the room is already bright
   - condition: template
     value_template: "{{ internet_down or is_dark }}"
 
@@ -123,13 +121,12 @@ action:
             data:
               brightness_pct: !input brightness_pct
 
+  # Wait until motion stays continuously off for the configured duration
   - wait_for_trigger:
       - platform: state
         entity_id: !input motion_sensor
-        from: "on"
         to: "off"
-
-  - delay: !input no_motion_wait
+        for: !input no_motion_wait
 
   - action: light.turn_off
     target: !input light_target
