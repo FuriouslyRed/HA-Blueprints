@@ -1,9 +1,9 @@
 blueprint:
   name: Motion Night Light
   description: >
-    Turn on a night light when motion is detected, provided ambient light is at 
-    or below a configurable lux threshold (e.g. 0 lx for pitch black). 
-    If internet connectivity is lost, overrides normal mode to shine red at 10% brightness. 
+    Turn on a night light from sunset to sunrise when motion is detected, provided 
+    ambient light is at or below a configurable lux threshold. If internet connectivity 
+    is lost, overrides normal mode 24/7 to shine red at 10% brightness. 
     Runs as a single instance and turns off once motion has stayed clear for the configured duration.
   domain: automation
   source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/motion_night_light.yaml
@@ -91,16 +91,19 @@ variables:
   lux_sensor: !input illuminance_sensor
   max_lux: !input max_illuminance
   internet_down: "{{ states(net_sensor) in ['off', 'unavailable', 'unknown'] }}"
+  # Check if sun is below the horizon (between sunset and sunrise)
+  is_night: "{{ is_state('sun.sun', 'below_horizon') }}"
   is_dark: >
     {{ lux_sensor == '' or lux_sensor is none or (states(lux_sensor) | float(0) <= max_lux | float(0)) }}
 
 condition:
+  # Allow execution 24/7 if offline, otherwise strictly between sunset and sunrise when dark
   - condition: template
-    value_template: "{{ internet_down or is_dark }}"
+    value_template: "{{ internet_down or (is_night and is_dark) }}"
 
 action:
   - choose:
-      # OFFLINE ALERT MODE (Precedence)
+      # OFFLINE ALERT MODE (Runs 24/7, takes top precedence)
       - conditions:
           - condition: template
             value_template: "{{ internet_down }}"
@@ -111,10 +114,10 @@ action:
               rgb_color: [255, 0, 0]
               brightness_pct: 10
 
-      # NORMAL NIGHT LIGHT MODE
+      # NORMAL NIGHT LIGHT MODE (Sunset to sunrise only)
       - conditions:
           - condition: template
-            value_template: "{{ not internet_down and is_dark }}"
+            value_template: "{{ not internet_down and is_night and is_dark }}"
         sequence:
           - action: light.turn_on
             target: !input light_target
