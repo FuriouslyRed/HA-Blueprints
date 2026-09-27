@@ -153,12 +153,10 @@ action:
                     data:
                       brightness: "{{ light_brightness }}"
                       transition: 1
-            # Fallback if no specific attributes were set
             default:
               - action: light.turn_on
                 target:
                   entity_id: !input alert_light
-    # If light was originally off, turn it off
     default:
       - action: light.turn_off
         target:
