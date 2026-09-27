@@ -111,50 +111,55 @@ action:
         - delay:
             milliseconds: 1500
 
-  # Water cleared: Restore light to pre-alert state
-  - if:
-      - condition: template
-        value_template: "{{ light_was_on }}"
-    then:
-      - if:
+  # Water cleared: Restore light to pre-alert state cleanly via choose blocks
+  - choose:
+      - conditions:
           - condition: template
-            value_template: "{{ light_kelvin is not none }}"
-        then:
-          - action: light.turn_on
-            target:
-              entity_id: !input alert_light
-            data:
-              brightness: "{{ light_brightness | default(255, true) }}"
-              color_temp_kelvin: "{{ light_kelvin }}"
-              transition: 1
-        else:
-          - if:
-              - condition: template
-                value_template: "{{ light_rgb is not none }}"
-            then:
-              - action: light.turn_on
-                target:
-                  entity_id: !input alert_light
-                data:
-                  brightness: "{{ light_brightness | default(255, true) }}"
-                  rgb_color: "{{ light_rgb }}"
-                  transition: 1
-            else:
-              - if:
+            value_template: "{{ light_was_on }}"
+        sequence:
+          - choose:
+              # Kelvin / Temperature
+              - conditions:
+                  - condition: template
+                    value_template: "{{ light_kelvin is not none }}"
+                sequence:
+                  - action: light.turn_on
+                    target:
+                      entity_id: !input alert_light
+                    data:
+                      brightness: "{{ light_brightness | default(255, true) }}"
+                      color_temp_kelvin: "{{ light_kelvin }}"
+                      transition: 1
+              # RGB Color
+              - conditions:
+                  - condition: template
+                    value_template: "{{ light_rgb is not none }}"
+                sequence:
+                  - action: light.turn_on
+                    target:
+                      entity_id: !input alert_light
+                    data:
+                      brightness: "{{ light_brightness | default(255, true) }}"
+                      rgb_color: "{{ light_rgb }}"
+                      transition: 1
+              # Brightness only
+              - conditions:
                   - condition: template
                     value_template: "{{ light_brightness is not none }}"
-                then:
+                sequence:
                   - action: light.turn_on
                     target:
                       entity_id: !input alert_light
                     data:
                       brightness: "{{ light_brightness }}"
                       transition: 1
-              else:
-                - action: light.turn_on
-                  target:
-                    entity_id: !input alert_light
-    else:
+            # Fallback if no specific attributes were set
+            default:
+              - action: light.turn_on
+                target:
+                  entity_id: !input alert_light
+    # If light was originally off, turn it off
+    default:
       - action: light.turn_off
         target:
           entity_id: !input alert_light
