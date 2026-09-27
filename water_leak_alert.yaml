@@ -1,0 +1,198 @@
+blueprint:
+  name: Water Leak Alert & Lockout
+  description: >-
+    Shuts off a device during a leak, pulses an alert light until dry, and keeps
+    the device locked off until manually reset. Includes optional leak emulation.
+  domain: automation
+  source_url: https://github.com/FuriouslyRed/HA-Blueprints/blob/main/water_leak_alert.yaml
+  input:
+    leak_sensor:
+      name: Water Leak Sensor
+      description: Physical moisture sensor triggering the alert.
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+            device_class: moisture
+    target_device:
+      name: Target Device
+      description: Switch, valve, or plug to shut down and lock out.
+      selector:
+        entity:
+          filter:
+            - domain: switch
+            - domain: valve
+            - domain: light
+            - domain: fan
+    alert_light:
+      name: Alert Light
+      description: Light that pulses red during the leak.
+      selector:
+        entity:
+          filter:
+            domain: light
+    reset_entity:
+      name: Reset Button / Helper
+      description: An input_button, button, or input_boolean to release the device lockout.
+      selector:
+        entity:
+          filter:
+            - domain: button
+            - domain: input_button
+            - domain: input_boolean
+    debug_switch:
+      name: Debug Emulation Switch (Optional)
+      description: >-
+        Optional toggle switch or helper (input_boolean) to simulate water detection.
+        Turn ON to force the alert, turn OFF to simulate drying out.
+        Leave blank to disable debug mode.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+            - domain: switch
+
+trigger_variables:
+  leak_entity: !input leak_sensor
+  debug_entity: !input debug_switch
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - trigger: template
+    value_template: >-
+      {{ is_state(leak_entity, 'on') or (debug_entity not in ['', 'none', none] and is_state(debug_entity, 'on')) }}
+
+action:
+  # Capture pre-alert light state into variables (zero lingering scenes)
+  - variables:
+      alert_light_entity: !input alert_light
+      reset_entity_var: !input reset_entity
+      light_was_on: "{{ is_state(alert_light_entity, 'on') }}"
+      light_brightness: "{{ state_attr(alert_light_entity, 'brightness') }}"
+      light_color_mode: "{{ state_attr(alert_light_entity, 'color_mode') }}"
+      light_kelvin: "{{ state_attr(alert_light_entity, 'color_temp_kelvin') }}"
+      light_rgb: "{{ state_attr(alert_light_entity, 'rgb_color') }}"
+
+  # Initial immediate shutoff
+  - action: homeassistant.turn_off
+    target:
+      entity_id: !input target_device
+
+  # Phase 1: Water active (or debug active) — pulse red & enforce device off every 1.5s
+  - repeat:
+      while:
+        - condition: template
+          value_template: >-
+            {{ is_state(leak_entity, 'on') or (debug_entity not in ['', 'none', none] and is_state(debug_entity, 'on')) }}
+      sequence:
+        - action: homeassistant.turn_off
+          target:
+            entity_id: !input target_device
+        - action: light.turn_on
+          target:
+            entity_id: !input alert_light
+          data:
+            rgb_color: [255, 0, 0]
+            brightness: 255
+            transition: 1
+        - delay:
+            milliseconds: 1500
+        - action: homeassistant.turn_off
+          target:
+            entity_id: !input target_device
+        - action: light.turn_off
+          target:
+            entity_id: !input alert_light
+          data:
+            transition: 1
+        - delay:
+            milliseconds: 1500
+
+  # Water cleared: Restore light to pre-alert state
+  - if:
+      - condition: template
+        value_template: "{{ light_was_on }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ light_kelvin is not none }}"
+        then:
+          - action: light.turn_on
+            target:
+              entity_id: !input alert_light
+            data:
+              brightness: "{{ light_brightness | default(255, true) }}"
+              color_temp_kelvin: "{{ light_kelvin }}"
+              transition: 1
+        else:
+          - if:
+              - condition: template
+                value_template: "{{ light_rgb is not none }}"
+            then:
+              - action: light.turn_on
+                target:
+                  entity_id: !input alert_light
+                data:
+                  brightness: "{{ light_brightness | default(255, true) }}"
+                  rgb_color: "{{ light_rgb }}"
+                  transition: 1
+            else:
+              - if:
+                  - condition: template
+                    value_template: "{{ light_brightness is not none }}"
+                then:
+                  - action: light.turn_on
+                    target:
+                      entity_id: !input alert_light
+                    data:
+                      brightness: "{{ light_brightness }}"
+                      transition: 1
+              else:
+                - action: light.turn_on
+                  target:
+                    entity_id: !input alert_light
+    else:
+      - action: light.turn_off
+        target:
+          entity_id: !input alert_light
+        data:
+          transition: 1
+
+  # Phase 2: Lockout loop. Water is dry, but target device stays locked off until reset is fired.
+  - repeat:
+      sequence:
+        - action: homeassistant.turn_off
+          target:
+            entity_id: !input target_device
+        - wait_for_trigger:
+            - trigger: state
+              entity_id: !input reset_entity
+              id: reset
+            - trigger: state
+              entity_id: !input target_device
+              to: "on"
+              id: turned_on
+          timeout:
+            hours: 24
+        - if:
+            - condition: template
+              value_template: "{{ wait.trigger is not none and wait.trigger.id == 'turned_on' }}"
+          then:
+            - action: homeassistant.turn_off
+              target:
+                entity_id: !input target_device
+      until:
+        - condition: template
+          value_template: "{{ wait.trigger is not none and wait.trigger.id == 'reset' }}"
+
+  # If an input_boolean helper was used as the reset toggle, switch it back off
+  - if:
+      - condition: template
+        value_template: "{{ reset_entity_var.startswith('input_boolean.') and is_state(reset_entity_var, 'on') }}"
+    then:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: !input reset_entity
